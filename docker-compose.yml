@@ -1,15 +1,15 @@
 # Recruitment Service — standalone stack for this repo only.
 #
-# We do not have access to the CRM's docker-compose/network on the
-# production server. `celestial-shared` below is a placeholder external
-# network name for wherever the CRM containers live — confirm the real name
-# with whoever manages that stack before deploying, and create it there with
-# `docker network create <name>` if it doesn't already exist. Until then this
-# file works standalone for local development.
+# `celestial-shared` below is a placeholder external network name for local
+# dev. On the production server it's actually CRM's own compose-generated
+# network (`celestial-crm_default`, from the CRM stack at /opt/celestial-crm)
+# — set CELESTIAL_NETWORK_NAME=celestial-crm_default in .env there; no need
+# to create a separate network, recruitment-api just joins CRM's existing one.
 
 services:
   recruitment-postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-recruitment}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
@@ -26,6 +26,7 @@ services:
 
   recruitment-api:
     build: .
+    restart: unless-stopped
     env_file: .env
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     depends_on:
@@ -41,6 +42,7 @@ services:
 
   recruitment-worker:
     build: .
+    restart: unless-stopped
     env_file: .env
     command: python -m app.worker
     depends_on:
