@@ -1,0 +1,60 @@
+# Recruitment Service — standalone stack for this repo only.
+#
+# We do not have access to the CRM's docker-compose/network on the
+# production server. `celestial-shared` below is a placeholder external
+# network name for wherever the CRM containers live — confirm the real name
+# with whoever manages that stack before deploying, and create it there with
+# `docker network create <name>` if it doesn't already exist. Until then this
+# file works standalone for local development.
+
+services:
+  recruitment-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-recruitment}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DB:-recruitment}
+    volumes:
+      - recruitment-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-recruitment}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - internal
+
+  recruitment-api:
+    build: .
+    env_file: .env
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    depends_on:
+      recruitment-postgres:
+        condition: service_healthy
+    networks:
+      - internal
+      - celestial-shared
+    # No ports published by default — reachable only from other containers on
+    # celestial-shared (e.g. the CRM backend). Uncomment for local testing:
+    # ports:
+    #   - "8000:8000"
+
+  recruitment-worker:
+    build: .
+    env_file: .env
+    command: python -m app.worker
+    depends_on:
+      recruitment-postgres:
+        condition: service_healthy
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge
+  celestial-shared:
+    external: true
+    name: ${CELESTIAL_NETWORK_NAME:-celestial-shared}
+
+volumes:
+  recruitment-postgres-data:
