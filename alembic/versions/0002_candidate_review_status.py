@@ -18,14 +18,16 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # postgresql.ENUM is only auto-created by Alembic/SQLAlchemy when used
+    # inside op.create_table() — a standalone op.add_column() on an existing
+    # table does NOT create the backing type, so it must be created
+    # explicitly first (checkfirst=True makes this safe to re-run).
+    review_status_enum = postgresql.ENUM("pending", "added", "skipped", name="review_status")
+    review_status_enum.create(op.get_bind(), checkfirst=True)
+
     op.add_column(
         "external_candidates",
-        sa.Column(
-            "review_status",
-            postgresql.ENUM("pending", "added", "skipped", name="review_status"),
-            nullable=False,
-            server_default="pending",
-        ),
+        sa.Column("review_status", review_status_enum, nullable=False, server_default="pending"),
     )
     op.add_column("external_candidates", sa.Column("reviewed_at", sa.DateTime(timezone=True), nullable=True))
     op.add_column("external_candidates", sa.Column("reviewed_by", sa.String(255), nullable=True))
