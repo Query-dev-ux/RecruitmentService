@@ -108,3 +108,75 @@ def test_list_respects_limit(client, auth_headers):
     response = client.get("/external-candidates", params={"limit": 2}, headers=auth_headers)
 
     assert len(response.json()) == 2
+
+
+def test_new_candidate_starts_pending(client, auth_headers):
+    submit = client.post("/telegram/applications", json={"telegram_user_id": 500}, headers=auth_headers).json()
+
+    candidate = client.get(f"/external-candidates/{submit['external_candidate_id']}", headers=auth_headers).json()
+
+    assert candidate["review_status"] == "pending"
+    assert candidate["reviewed_at"] is None
+    assert candidate["reviewed_by"] is None
+
+
+def test_review_candidate_marks_added(client, auth_headers):
+    submit = client.post("/telegram/applications", json={"telegram_user_id": 501}, headers=auth_headers).json()
+    candidate_id = submit["external_candidate_id"]
+
+    response = client.patch(
+        f"/external-candidates/{candidate_id}/review",
+        json={"decision": "added", "reviewed_by": "hr@company.com"},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["review_status"] == "added"
+    assert body["reviewed_by"] == "hr@company.com"
+    assert body["reviewed_at"] is not None
+
+
+def test_review_candidate_can_be_undone_back_to_pending(client, auth_headers):
+    submit = client.post("/telegram/applications", json={"telegram_user_id": 502}, headers=auth_headers).json()
+    candidate_id = submit["external_candidate_id"]
+    client.patch(f"/external-candidates/{candidate_id}/review", json={"decision": "skipped"}, headers=auth_headers)
+
+    response = client.patch(f"/external-candidates/{candidate_id}/review", json={"decision": "pending"}, headers=auth_headers)
+
+    assert response.json()["review_status"] == "pending"
+
+
+def test_review_unknown_candidate_returns_404(client, auth_headers):
+    response = client.patch(
+        "/external-candidates/00000000-0000-0000-0000-000000000000/review",
+        json={"decision": "added"},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 404
+
+
+def test_review_requires_auth(client):
+    response = client.patch(
+        "/external-candidates/00000000-0000-0000-0000-000000000000/review", json={"decision": "added"}
+    )
+
+    assert response.status_code == 401
+
+
+def test_list_filters_by_review_status(client, auth_headers):
+    added = client.post("/telegram/applications", json={"telegram_user_id": 600}, headers=auth_headers).json()
+    client.post("/telegram/applications", json={"telegram_user_id": 601}, headers=auth_headers)
+    client.patch(
+        f"/external-candidates/{added['external_candidate_id']}/review",
+        json={"decision": "added"},
+        headers=auth_headers,
+    )
+
+    pending = client.get("/external-candidates", params={"review_status": "pending"}, headers=auth_headers).json()
+    added_list = client.get("/external-candidates", params={"review_status": "added"}, headers=auth_headers).json()
+
+    assert len(pending) == 1
+    assert len(added_list) == 1
+    assert added_list[0]["id"] == added["external_candidate_id"]

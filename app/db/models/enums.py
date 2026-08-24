@@ -45,3 +45,13 @@ class ProviderAccountStatus(str, enum.Enum):
     CONNECTED = "connected"
     DISCONNECTED = "disconnected"
     ERROR = "error"
+
+
+class ReviewStatus(str, enum.Enum):
+    """HR's triage decision on a raw finding (search result or inbound
+    response) — NOT the hiring pipeline itself, which stays entirely in CRM
+    once a candidate is ADDED. See docs/API_INTEGRATION.md."""
+
+    PENDING = "pending"
+    ADDED = "added"
+    SKIPPED = "skipped"

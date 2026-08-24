@@ -6,7 +6,7 @@ from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, Integer, J
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDPKMixin
-from app.db.models.enums import ScoreTier, SourceType
+from app.db.models.enums import ReviewStatus, ScoreTier, SourceType
 
 
 class ExternalCandidate(UUIDPKMixin, TimestampMixin, Base):
@@ -23,6 +23,18 @@ class ExternalCandidate(UUIDPKMixin, TimestampMixin, Base):
     # today — this column is reserved for a future write-back/ack endpoint
     # and stays null until one exists.
     crm_candidate_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+    # HR's triage decision on this raw finding — NOT the hiring pipeline
+    # itself (that's entirely CRM's, once ADDED). Every new finding (search
+    # result or, later, inbound response) starts PENDING regardless of
+    # source — the same gate applies everywhere.
+    review_status: Mapped[ReviewStatus] = mapped_column(
+        SAEnum(ReviewStatus, name="review_status", values_callable=lambda e: [m.value for m in e]),
+        nullable=False,
+        default=ReviewStatus.PENDING,
+    )
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     sources: Mapped[list["CandidateSource"]] = relationship(back_populates="candidate", cascade="all, delete-orphan")
     scores: Mapped[list["CandidateScore"]] = relationship(back_populates="candidate", cascade="all, delete-orphan")

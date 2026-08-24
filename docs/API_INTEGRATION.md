@@ -182,14 +182,22 @@ Recruitment Service.
 **Это основной эндпоинт для CRM.** Здесь забираются найденные и оценённые кандидаты —
 из HH и (когда подключим Telegram-бота) из Telegram.
 
+Каждая находка (результат поиска или входящий отклик) проходит **единый шлюз
+триажа** — `review_status`: `pending` → `added` / `skipped`. Это не HR-пайплайн найма
+(интервью/оффер/отказ — полностью в CRM), а только бинарное решение «эту находку HR
+уже разобрала или нет». Экраны «🔎 Поиск кандидатов» и «📩 Отклики» в UI — это, по
+сути, один и тот же список с `review_status=pending`, просто с разными фильтрами
+сверху; «👤 Кандидаты» — список с `review_status=added`.
+
 ```
-GET /external-candidates?search_template_id={id}&min_score=55&source=hh&limit=50&offset=0
+GET /external-candidates?search_template_id={id}&min_score=55&source=hh&review_status=pending&limit=50&offset=0
 ```
 
 Параметры (все опциональны):
 - `source` — `hh` | `telegram`
 - `search_template_id` — только кандидаты, оценённые по этому шаблону
 - `min_score` — только с score ≥ N (0–100)
+- `review_status` — `pending` | `added` | `skipped`
 - `limit` (по умолчанию 50, максимум 200), `offset`
 
 ```json
@@ -207,6 +215,9 @@ GET /external-candidates?search_template_id={id}&min_score=55&source=hh&limit=50
       "text_blob": "..."
     },
     "crm_candidate_id": null,
+    "review_status": "pending",
+    "reviewed_at": null,
+    "reviewed_by": null,
     "sources": [
       { "source": "hh", "external_id": "12345", "external_url": "https://hh.ru/resume/12345", "first_seen_at": "...", "last_seen_at": "..." }
     ],
@@ -230,8 +241,21 @@ GET /external-candidates?search_template_id={id}&min_score=55&source=hh&limit=50
   сообщала нам свой ID), сейчас всегда `null`.
 
 **Как CRM должна это использовать:** периодически (или по кнопке в UI) забирать
-список, и для новых/подходящих кандидатов создавать `Candidate`/`Application` в своей
-базе — как именно это делать, решает CRM, Recruitment Service не диктует.
+список с `review_status=pending`. Когда HR принимает решение — вызвать
+`PATCH /external-candidates/{id}/review`, и только для `added` создавать
+`Candidate`/`Application` в своей базе — как именно это делать дальше, решает CRM,
+Recruitment Service не диктует.
+
+### Триаж — `PATCH /external-candidates/{id}/review`
+
+```
+PATCH /external-candidates/{id}/review
+{ "decision": "added", "reviewed_by": "hr@company.com" }   // или "skipped", или "pending" (чтобы отменить решение)
+→ 200  (тот же объект ExternalCandidateOut, с обновлённым review_status/reviewed_at/reviewed_by)
+```
+
+`reviewed_by` необязателен — можно передать email/ID HR-пользователя для аудита, можно
+не передавать.
 
 ---
 
@@ -289,21 +313,25 @@ HH-интеграция ещё не проверена вживую — прил
 
 ## Рекомендуемый UI для CRM
 
-Раздел в навигации CRM, примерно так, как было в исходном ТЗ:
-
 ```
 Recruitment
-├── Поисковые шаблоны
-├── Кандидаты
-├── Отклики (Telegram — после подключения бота)
-└── Настройки
+├── 🔎 Поиск кандидатов
+├── 📩 Отклики
+├── 👤 Кандидаты
+└── ⚙️ Настройки
 ```
 
-### Поисковые шаблоны
+Единый принцип: **всё новое (и результаты поиска, и входящие отклики) стартует как
+`review_status=pending` и не становится «кандидатом», пока HR явно не нажмёт
+«Добавить в кандидаты» или «Пропустить».** «🔎 Поиск кандидатов» и «📩 Отклики» — по
+сути один и тот же пул pending-находок, просто с разным акцентом фильтров;
+«👤 Кандидаты» — отдельный список только `review_status=added`.
 
-- Список: `GET /search-templates` — имя, привязанная вакансия, статус автопоиска,
-  `last_run_at`/`last_success_at`/`last_error`.
-- Форма создания/редактирования:
+### 🔎 Поиск кандидатов
+
+- Шаблоны поиска: `GET /search-templates` — имя, привязанная вакансия, статус
+  автопоиска, `last_run_at`/`last_success_at`/`last_error`.
+- Форма шаблона:
   - Название, выбор вакансии CRM (её ID → `crm_vacancy_id`)
   - **Конструктор критериев** — HR выбирает из человеко-понятных полей (Должность,
     Опыт, Формат работы, Занятость, GEO, Язык, Зарплата, Статус поиска работы) +
@@ -316,33 +344,42 @@ Recruitment
     список, другие значения API отклонит).
   - Кнопка «Запустить поиск» → `POST /run`, дальше — поллинг статуса с индикатором
     queued/running/completed/failed и цифрами из `stats`.
+- Результаты конкретного запуска/шаблона: `GET /external-candidates?search_template_id={id}&review_status=pending`
+  — список найденного, ещё не разобранного HR. На каждой карточке — те же кнопки
+  «Добавить в кандидаты» / «Пропустить», что и в «Откликах» (см. ниже) — это один и
+  тот же `PATCH /review`.
 
-### Кандидаты
+### 📩 Отклики
 
-- `GET /external-candidates` с фильтрами по вакансии/шаблону, источнику, минимальному
-  score.
-- Карточка: имя (если есть — только после раскрытия контактов HH), позиция, GEO,
-  бейдж тира (LOW/MEDIUM/HIGH/HOT, цветом), иконки источников (HH/Telegram), по клику
-  — разбивка score (`breakdown`) для прозрачности HR.
+- `GET /external-candidates?review_status=pending&source=hh` и `source=telegram` (и
+  в будущем — HH negotiations, см. раздел «Чего пока нет»).
+- Карточка: имя (если есть — только после раскрытия контактов HH, у Telegram — из
+  текста заявки), позиция/текст отклика, GEO, бейдж тира (LOW/MEDIUM/HIGH/HOT,
+  цветом), иконка источника, по клику — разбивка score (`breakdown`).
 - Кандидатов с `hard_filters_passed: false` — либо не показывать по умолчанию, либо
-  явно помечать «не прошёл обязательные критерии».
-- Действие «Добавить в CRM» — здесь начинается зона ответственности CRM: создание
-  своего `Candidate`/`Application` из данных `parsed_profile` + `sources`. Recruitment
-  Service в этот момент уже не участвует.
-
-### Отклики (Telegram + HH negotiations)
-
-Можно не делать отдельным экраном — просто фильтр по источнику (`telegram`, в будущем
-и `hh-negotiation`) на экране «Кандидаты».
-
-- **Telegram** — актуально после подключения CGBot к `/telegram/applications`
+  явно помечать «не прошёл обязательные критерии» (но всё равно давать решить HR
+  вручную — это не запрет, а подсказка).
+- Две кнопки на каждой карточке:
+  - **«Добавить в кандидаты»** → `PATCH /external-candidates/{id}/review {"decision":"added"}`
+    → дальше CRM создаёт свой `Candidate`/`Application` из `parsed_profile` + `sources`.
+  - **«Пропустить»** → `{"decision":"skipped"}` — просто исчезает из pending, в
+    «Кандидаты» не попадает.
+- **Telegram** заработает после подключения CGBot к `/telegram/applications`
   (сейчас не подключён).
-- **HH negotiations** (входящие отклики на вакансии, размещённые на hh.ru, в отличие
-  от активного поиска по базе резюме) — **API-эндпоинт пока не реализован**, но
-  архитектурно запланирован как ещё один источник в тот же pipeline
-  (дедуп/scoring/`external-candidates`). См. раздел ниже.
 
-### Настройки
+### 👤 Кандидаты
+
+- `GET /external-candidates?review_status=added` — единая рабочая база: все, кого HR
+  уже отобрала, независимо от источника и от того, из какого шаблона/отклика они
+  пришли.
+- Поиск/фильтрация — по имени, вакансии, тиру, источнику и т.п. (это уже поверх
+  данных, которые отдаёт наш API — сама фильтрация может быть как на бэкенде CRM,
+  так и клиентской, на усмотрение реализации).
+- Дальнейший pipeline (этапы найма: скрининг/интервью/оффер/отказ) — **полностью
+  в CRM**, Recruitment Service этого не хранит и не должен.
+- Можно показывать `reviewed_by`/`reviewed_at` («кто и когда добавил») для аудита.
+
+### ⚙️ Настройки
 
 - Виджет статуса HH (`GET /providers/hh/status`) + кнопка «Подключить HH» → редирект
   на `authorize_url` из `POST /connect`.

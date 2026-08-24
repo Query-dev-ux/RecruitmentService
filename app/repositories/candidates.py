@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.models import CandidateScore, CandidateSource, ExternalCandidate
-from app.db.models.enums import ScoreTier, SourceType
+from app.db.models.enums import ReviewStatus, ScoreTier, SourceType
 
 _WITH_SOURCES_AND_SCORES = (
     selectinload(ExternalCandidate.sources),
@@ -115,12 +115,34 @@ async def get_candidate(db: AsyncSession, candidate_id: uuid.UUID) -> Optional[E
     return result.scalar_one_or_none()
 
 
+async def set_review_status(
+    db: AsyncSession,
+    candidate: ExternalCandidate,
+    *,
+    decision: ReviewStatus,
+    reviewed_by: Optional[str],
+) -> ExternalCandidate:
+    """The one HR decision Recruitment Service tracks: pending -> added/skipped
+    (or back to pending, to undo). Everything past ADDED — the actual hiring
+    pipeline — lives in CRM, not here."""
+    candidate.review_status = decision
+    candidate.reviewed_at = datetime.now(timezone.utc)
+    candidate.reviewed_by = reviewed_by
+    await db.commit()
+    # A fresh SELECT, not a partial db.refresh(attribute_names=[...]) — see
+    # the note in repositories/search_templates.py: partial refresh leaves
+    # other server-computed columns (e.g. updated_at) expired, which then
+    # blows up with MissingGreenlet during response serialization.
+    return await get_candidate(db, candidate.id)  # type: ignore[return-value]
+
+
 async def list_candidates(
     db: AsyncSession,
     *,
     source: Optional[SourceType] = None,
     search_template_id: Optional[uuid.UUID] = None,
     min_score: Optional[int] = None,
+    review_status: Optional[ReviewStatus] = None,
     limit: int = 50,
     offset: int = 0,
 ) -> list[ExternalCandidate]:
@@ -137,6 +159,8 @@ async def list_candidates(
     SQLite (used in tests) but fail on Postgres in production.
     """
     id_query = select(ExternalCandidate.id).distinct()
+    if review_status is not None:
+        id_query = id_query.where(ExternalCandidate.review_status == review_status)
     if source is not None:
         id_query = id_query.join(
             CandidateSource, CandidateSource.external_candidate_id == ExternalCandidate.id

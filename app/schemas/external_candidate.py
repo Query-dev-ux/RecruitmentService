@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
-from app.db.models.enums import ScoreTier, SourceType
+from app.db.models.enums import ReviewStatus, ScoreTier, SourceType
 
 
 class CandidateSourceOut(BaseModel):
@@ -36,5 +36,13 @@ class ExternalCandidateOut(BaseModel):
     last_seen_at: datetime
     parsed_profile: Optional[dict]
     crm_candidate_id: Optional[str]
+    review_status: ReviewStatus
+    reviewed_at: Optional[datetime]
+    reviewed_by: Optional[str]
     sources: list[CandidateSourceOut]
     scores: list[CandidateScoreOut]
+
+
+class CandidateReviewIn(BaseModel):
+    decision: ReviewStatus  # "added" or "skipped" in practice; "pending" allowed to undo a decision
+    reviewed_by: Optional[str] = None
