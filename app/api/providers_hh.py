@@ -10,10 +10,12 @@ from app.api.deps import require_service_token
 from app.db.base import get_db
 from app.db.models import ProviderAccount, ProviderToken
 from app.db.models.enums import ProviderAccountStatus, ProviderType
+from app.logging_config import get_logger, log_event
 from app.providers.hh.auth import build_authorize_url, exchange_code_for_token
 from app.schemas.provider import HHConnectOut, HHStatusOut
 
 router = APIRouter(prefix="/providers/hh", tags=["providers-hh"])
+logger = get_logger(__name__)
 
 
 async def _get_hh_account(db: AsyncSession) -> ProviderAccount | None:
@@ -61,18 +63,24 @@ async def hh_callback(
     The `code` itself (plus, once implemented, `state` verification) is
     what secures this endpoint, per standard OAuth practice.
 
-    Deployment note: recruitment-api currently has no port published to the
-    host (see docker-compose.yml) — this endpoint needs to be reachable
-    from wherever HH_REDIRECT_URI points, which likely means either
-    publishing just this path through a reverse proxy, or having CRM (which
-    is presumably public-facing already) receive the redirect on its own
-    domain and forward the code here over the internal network. Which of
-    those applies depends on the production server's setup — flagged, not
-    decided here.
+    Deployment note: recruitment-api has no port published to the host (see
+    docker-compose.yml) — reachability is solved via CRM's own nginx
+    (/opt/celestial-crm/infra/nginx/nginx.conf), which proxies exactly this
+    path to recruitment-api over the shared celestial-crm_default network.
+    HH_REDIRECT_URI is CRM's public domain, not ours.
     """
     try:
         token_response = await exchange_code_for_token(code)
     except httpx.HTTPStatusError as exc:
+        log_event(
+            logger,
+            "HH_TOKEN_EXCHANGE_FAILED",
+            level="error",
+            status_code=exc.response.status_code,
+            # HH's error body is small (e.g. {"error":"invalid_grant"}) and
+            # contains no token/secret material — safe to log as-is.
+            response_body=exc.response.text,
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Failed to exchange HH authorization code"
         ) from exc
