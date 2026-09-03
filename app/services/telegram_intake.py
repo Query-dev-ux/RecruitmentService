@@ -31,20 +31,27 @@ async def handle_telegram_application(
     db: AsyncSession,
     *,
     telegram_user_id: int,
+    telegram_full_name: Optional[str] = None,
+    telegram_username: Optional[str] = None,
     vacancy_ref: Optional[str],
     candidate_text: Optional[str],
     resume_file_ref: Optional[str],
 ) -> tuple[TelegramApplication, int]:
     log_event(logger, "TELEGRAM_APPLICATION_RECEIVED", telegram_user_id=telegram_user_id, vacancy_ref=vacancy_ref)
 
-    profile = normalize_telegram_application(candidate_text)
+    profile = normalize_telegram_application(candidate_text, full_name=telegram_full_name)
 
     candidate, is_new = await candidates_repo.get_or_create_candidate(
         db,
         source=SourceType.TELEGRAM,
         external_id=str(telegram_user_id),
-        external_url=None,
-        raw_data={"candidate_text": candidate_text, "resume_file_ref": resume_file_ref},
+        external_url=f"https://t.me/{telegram_username}" if telegram_username else None,
+        raw_data={
+            "candidate_text": candidate_text,
+            "resume_file_ref": resume_file_ref,
+            "telegram_full_name": telegram_full_name,
+            "telegram_username": telegram_username,
+        },
         parsed_profile=profile.model_dump(),
     )
     log_event(

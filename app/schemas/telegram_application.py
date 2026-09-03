@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field
 
 class TelegramApplicationIn(BaseModel):
     telegram_user_id: int
+    telegram_full_name: Optional[str] = Field(default=None, max_length=255)
+    telegram_username: Optional[str] = Field(default=None, max_length=255)
     vacancy_ref: Optional[str] = Field(default=None, max_length=255)
     candidate_text: Optional[str] = None
     # A reference (e.g. a Telegram file_id, or a URL) — not a binary upload.

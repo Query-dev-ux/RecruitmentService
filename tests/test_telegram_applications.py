@@ -53,3 +53,33 @@ def test_submit_does_not_score_against_unrelated_vacancy(client, auth_headers):
     )
 
     assert response.json()["scored_against_templates"] == 0
+
+
+def test_submit_captures_telegram_name_and_username(client, auth_headers):
+    submit = client.post(
+        "/telegram/applications",
+        json={
+            "telegram_user_id": 321,
+            "telegram_full_name": "Daniil CG",
+            "telegram_username": "daniil_cg",
+            "candidate_text": "hi",
+        },
+        headers=auth_headers,
+    ).json()
+
+    candidate = client.get(f"/external-candidates/{submit['external_candidate_id']}", headers=auth_headers).json()
+
+    assert candidate["parsed_profile"]["full_name"] == "Daniil CG"
+    assert candidate["sources"][0]["external_url"] == "https://t.me/daniil_cg"
+
+
+def test_submit_without_username_leaves_external_url_empty(client, auth_headers):
+    submit = client.post(
+        "/telegram/applications",
+        json={"telegram_user_id": 322, "telegram_full_name": "No Username Here"},
+        headers=auth_headers,
+    ).json()
+
+    candidate = client.get(f"/external-candidates/{submit['external_candidate_id']}", headers=auth_headers).json()
+
+    assert candidate["sources"][0]["external_url"] is None

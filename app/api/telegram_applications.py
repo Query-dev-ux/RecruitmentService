@@ -18,6 +18,8 @@ async def submit_telegram_application(
     application, scored_count = await handle_telegram_application(
         db,
         telegram_user_id=payload.telegram_user_id,
+        telegram_full_name=payload.telegram_full_name,
+        telegram_username=payload.telegram_username,
         vacancy_ref=payload.vacancy_ref,
         candidate_text=payload.candidate_text,
         resume_file_ref=payload.resume_file_ref,
