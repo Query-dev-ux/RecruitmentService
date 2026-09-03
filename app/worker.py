@@ -8,8 +8,8 @@ Three loops run side by side:
   search_run for every active template with auto_search_enabled=True whose
   next_run_at has arrived, unless it already has one in flight. This is the
   (comparatively heavy, rate-limited) active resume search.
-- `_negotiations_loop` runs every NEGOTIATIONS_POLL_INTERVAL_SECONDS (a few
-  minutes) and checks inbound HH responses for every active template with
+- `_negotiations_loop` runs every NEGOTIATIONS_POLL_INTERVAL_SECONDS (a
+  minute) and checks inbound HH responses for every active template with
   hh_vacancy_id set — independent of auto_search_enabled/interval_minutes
   entirely. Responses are free and cheap to check (see
   providers/hh/negotiations.py), so a template opts in just by having
@@ -50,7 +50,7 @@ logger = get_logger(__name__)
 
 POLL_INTERVAL_SECONDS = 5.0
 SCHEDULER_INTERVAL_SECONDS = 30.0
-NEGOTIATIONS_POLL_INTERVAL_SECONDS = 300.0  # 5 minutes
+NEGOTIATIONS_POLL_INTERVAL_SECONDS = 60.0  # 1 minute — cheap read-only check, no paid tariff
 DEFAULT_INTERVAL_MINUTES = 60
 
 
