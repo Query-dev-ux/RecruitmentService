@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.db.models import ProviderAccount, ProviderToken, SearchTemplate, SearchTemplateCriterion
 from app.db.models.enums import CriterionMode, ProviderAccountStatus, ProviderType, SearchRunTrigger
 from app.repositories import search_runs as search_runs_repo
-from app.worker import get_connected_hh_access_token, process_one_run
+from app.worker import check_negotiations_for_due_templates, get_connected_hh_access_token, process_one_run
 
 
 @pytest.fixture
@@ -129,3 +129,73 @@ async def test_process_one_run_pulls_negotiations_for_hh_vacancy_id(db_session: 
     assert refreshed.status.value == "completed"
     assert refreshed.stats["found"] == 1
     assert refreshed.stats["new"] == 1
+
+
+async def test_check_negotiations_returns_empty_without_connected_account(db_session: AsyncSession):
+    template = SearchTemplate(name="Media Buyer", hh_vacancy_id="777")
+    db_session.add(template)
+    await db_session.commit()
+
+    checked = await check_negotiations_for_due_templates(db_session)
+
+    assert checked == []
+
+
+async def test_check_negotiations_ignores_templates_without_hh_vacancy_id(db_session: AsyncSession):
+    account = ProviderAccount(provider=ProviderType.HH, status=ProviderAccountStatus.CONNECTED)
+    db_session.add(account)
+    await db_session.commit()
+    db_session.add(ProviderToken(provider_account_id=account.id, access_token="live-token"))
+    template = SearchTemplate(name="No HH vacancy")
+    db_session.add(template)
+    await db_session.commit()
+
+    checked = await check_negotiations_for_due_templates(db_session)
+
+    assert checked == []
+
+
+@pytest.mark.respx(base_url="https://api.hh.ru")
+async def test_check_negotiations_creates_run_and_never_touches_resumes_endpoint(
+    db_session: AsyncSession, respx_mock
+):
+    respx_mock.get("/negotiations/response").mock(
+        return_value=httpx.Response(200, json={"items": [{"id": "neg-1", "resume": {"id": "res-1"}}], "pages": 1})
+    )
+    # No /resumes route registered at all — if include_search=False didn't
+    # actually skip the search path, this test would fail on an unmocked
+    # request rather than silently passing.
+
+    account = ProviderAccount(provider=ProviderType.HH, status=ProviderAccountStatus.CONNECTED)
+    db_session.add(account)
+    await db_session.commit()
+    db_session.add(ProviderToken(provider_account_id=account.id, access_token="live-token"))
+    criteria = [SearchTemplateCriterion(key="vertical", value="igaming", mode=CriterionMode.PREFERRED, weight=100)]
+    template = SearchTemplate(name="Media Buyer", hh_vacancy_id="777", criteria=criteria)
+    db_session.add(template)
+    await db_session.commit()
+
+    checked = await check_negotiations_for_due_templates(db_session)
+
+    assert checked == [template.id]
+    runs = await search_runs_repo.list_search_runs(db_session, search_template_id=template.id)
+    assert len(runs) == 1
+    assert runs[0].status.value == "completed"
+    assert runs[0].stats["found"] == 1
+
+
+async def test_check_negotiations_skips_template_with_run_already_in_flight(db_session: AsyncSession):
+    account = ProviderAccount(provider=ProviderType.HH, status=ProviderAccountStatus.CONNECTED)
+    db_session.add(account)
+    await db_session.commit()
+    db_session.add(ProviderToken(provider_account_id=account.id, access_token="live-token"))
+    template = SearchTemplate(name="Media Buyer", hh_vacancy_id="777")
+    db_session.add(template)
+    await db_session.commit()
+    await search_runs_repo.create_search_run(
+        db_session, search_template_id=template.id, trigger=SearchRunTrigger.MANUAL
+    )
+
+    checked = await check_negotiations_for_due_templates(db_session)
+
+    assert checked == []

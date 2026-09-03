@@ -54,19 +54,27 @@ async def execute_search_run(
     template: SearchTemplate,
     fetch_resumes: ResumeFetcher,
     fetch_negotiations: Optional[NegotiationsFetcher] = None,
+    *,
+    include_search: bool = True,
+    include_negotiations: bool = True,
 ) -> None:
+    """`include_search`/`include_negotiations` let a caller run just one
+    side even when the template has both — used by the worker's dedicated,
+    much-more-frequent negotiations poll (every few minutes, independent of
+    auto_search_enabled/interval_minutes) so it never triggers a full
+    resume search just to check for new responses."""
     log_event(logger, "SEARCH_STARTED", search_run_id=str(search_run.id), search_template_id=str(template.id))
 
     stats = {"found": 0, "new": 0, "known": 0, "passed_hard_filters": 0, "above_threshold": 0}
     threshold = (template.score_thresholds or {}).get("medium", DEFAULT_ABOVE_THRESHOLD_TIER)
 
     try:
-        if template.criteria:
+        if include_search and template.criteria:
             params = build_search_params(template.criteria)
             async for raw_resume in fetch_resumes(params):
                 await _process_hh_resume(db, template, stats, threshold, raw_resume, via="search")
 
-        if template.hh_vacancy_id and fetch_negotiations is not None:
+        if include_negotiations and template.hh_vacancy_id and fetch_negotiations is not None:
             async for raw_resume in fetch_negotiations(template.hh_vacancy_id):
                 await _process_hh_resume(db, template, stats, threshold, raw_resume, via="negotiation")
 
