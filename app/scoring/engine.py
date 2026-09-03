@@ -24,6 +24,7 @@ scored.
 from dataclasses import dataclass
 from typing import Optional, Protocol
 
+from app.criteria import split_alternatives
 from app.db.models.enums import CriterionMode, ScoreTier
 from app.providers.base import ParsedProfile
 
@@ -111,6 +112,17 @@ def _tier_for_score(score: int, thresholds: dict) -> ScoreTier:
 
 
 def _match(key: str, value: str, profile: ParsedProfile) -> float:
+    """A criterion's value may be several `|`-separated alternatives (see
+    app/criteria.py) — e.g. a position title with synonyms, or a GEO group.
+    Best-alternative-wins: the candidate needs to satisfy only one of them,
+    same OR semantics as the HH query side in providers/hh/search.py."""
+    alternatives = split_alternatives(value)
+    if len(alternatives) > 1:
+        return max(_match_single(key, alternative, profile) for alternative in alternatives)
+    return _match_single(key, value, profile)
+
+
+def _match_single(key: str, value: str, profile: ParsedProfile) -> float:
     if key == "experience_level":
         return _match_experience_level(value, profile.total_experience_months)
     if key == "min_experience_months":

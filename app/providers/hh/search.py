@@ -20,10 +20,19 @@ PREFERRED criterion as one would wrongly drop candidates who don't match it
 from the search results entirely. PREFERRED criteria only ever bias
 full-text recall (OR'd in) or, for structured fields, are left out of the
 HH query altogether and scored purely after fetch.
+
+A criterion's value may itself be several `|`-separated alternatives (see
+app/criteria.py) — e.g. a position title with synonyms, or a GEO group.
+Each alternative is mapped independently; for a structured field that means
+multiple values for the same HH query param (HH accepts repeated params —
+confirmed for experience/employment_form/work_format/job_search_status/area
+during the same research pass); for free text it means an OR sub-group
+folded into the AND/OR text query below.
 """
 
 from typing import Optional, Protocol
 
+from app.criteria import split_alternatives
 from app.db.models.enums import CriterionMode
 
 EXPERIENCE_LEVELS = {
@@ -77,14 +86,14 @@ def build_search_params(criteria: list[Criterion]) -> dict[str, list[str]]:
 
         if criterion.mode == CriterionMode.REQUIRED:
             mapped = _map_structured_field(criterion.key, criterion.value)
-            if mapped is not None:
-                field, value = mapped
-                params.setdefault(field, []).append(value)
+            if mapped:
+                for field, value in mapped:
+                    params.setdefault(field, []).append(value)
                 continue
-            required_terms.append(criterion.value)
+            required_terms.append(_as_text_term(criterion.value))
         else:
             # PREFERRED never becomes a hard filter — see module docstring.
-            preferred_terms.append(criterion.value)
+            preferred_terms.append(_as_text_term(criterion.value))
 
     text_query = _build_text_query(required_terms, preferred_terms)
     if text_query:
@@ -93,7 +102,27 @@ def build_search_params(criteria: list[Criterion]) -> dict[str, list[str]]:
     return params
 
 
-def _map_structured_field(key: str, value: str) -> Optional[tuple[str, str]]:
+def _as_text_term(value: str) -> str:
+    """One criterion's value -> one text-query term. Multiple `|`-separated
+    alternatives become their own parenthesized OR group so e.g. a required
+    "Media Buyer|Traffic Manager" reads as (must match either), not as a
+    literal string containing a pipe."""
+    alternatives = split_alternatives(value)
+    if len(alternatives) <= 1:
+        return value
+    return "(" + " OR ".join(alternatives) + ")"
+
+
+def _map_structured_field(key: str, value: str) -> list[tuple[str, str]]:
+    mapped = []
+    for alternative in split_alternatives(value):
+        result = _map_single_value(key, alternative)
+        if result is not None:
+            mapped.append(result)
+    return mapped
+
+
+def _map_single_value(key: str, value: str) -> Optional[tuple[str, str]]:
     if key == "experience_level" and value in EXPERIENCE_LEVELS:
         return "experience", EXPERIENCE_LEVELS[value]
     if key == "employment_type" and value in EMPLOYMENT_TYPES:
