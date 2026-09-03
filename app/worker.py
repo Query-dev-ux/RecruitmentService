@@ -29,6 +29,7 @@ from app.db.models import ProviderAccount, ProviderToken, SearchRun, SearchTempl
 from app.db.models.enums import ProviderAccountStatus, ProviderType, SearchRunStatus, SearchRunTrigger
 from app.logging_config import configure_logging, get_logger, log_event
 from app.providers.hh.client import HHClient
+from app.providers.hh.negotiations import iter_negotiation_resumes
 from app.providers.hh.resumes import iter_all_resumes
 from app.repositories import search_runs as search_runs_repo
 from app.services.search_execution import execute_search_run
@@ -86,7 +87,11 @@ async def process_one_run(db, run_id: uuid.UUID) -> None:
             async for resume_summary in iter_all_resumes(client, params):
                 yield resume_summary
 
-        await execute_search_run(db, run, template, fetch_resumes)
+        async def fetch_negotiations(vacancy_id: str):
+            async for resume_summary in iter_negotiation_resumes(client, vacancy_id):
+                yield resume_summary
+
+        await execute_search_run(db, run, template, fetch_resumes, fetch_negotiations)
 
 
 async def _has_pending_run(db, search_template_id: uuid.UUID) -> bool:

@@ -3,8 +3,8 @@ import pytest
 import respx
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.db.models import ProviderAccount, ProviderToken, SearchTemplate
-from app.db.models.enums import ProviderAccountStatus, ProviderType, SearchRunTrigger
+from app.db.models import ProviderAccount, ProviderToken, SearchTemplate, SearchTemplateCriterion
+from app.db.models.enums import CriterionMode, ProviderAccountStatus, ProviderType, SearchRunTrigger
 from app.repositories import search_runs as search_runs_repo
 from app.worker import get_connected_hh_access_token, process_one_run
 
@@ -89,7 +89,8 @@ async def test_process_one_run_completes_with_connected_account(db_session: Asyn
     db_session.add(account)
     await db_session.commit()
     db_session.add(ProviderToken(provider_account_id=account.id, access_token="live-token"))
-    template = SearchTemplate(name="Media Buyer")
+    criteria = [SearchTemplateCriterion(key="vertical", value="igaming", mode=CriterionMode.PREFERRED, weight=100)]
+    template = SearchTemplate(name="Media Buyer", criteria=criteria)
     db_session.add(template)
     await db_session.commit()
     run = await search_runs_repo.create_search_run(
@@ -101,3 +102,30 @@ async def test_process_one_run_completes_with_connected_account(db_session: Asyn
     refreshed = await search_runs_repo.get_search_run(db_session, run.id)
     assert refreshed.status.value == "completed"
     assert refreshed.stats == {"found": 0, "new": 0, "known": 0, "passed_hard_filters": 0, "above_threshold": 0}
+
+
+@pytest.mark.respx(base_url="https://api.hh.ru")
+async def test_process_one_run_pulls_negotiations_for_hh_vacancy_id(db_session: AsyncSession, respx_mock):
+    respx_mock.get("/negotiations/response").mock(
+        return_value=httpx.Response(
+            200, json={"items": [{"id": "neg-1", "resume": {"id": "res-1"}}], "pages": 1}
+        )
+    )
+
+    account = ProviderAccount(provider=ProviderType.HH, status=ProviderAccountStatus.CONNECTED)
+    db_session.add(account)
+    await db_session.commit()
+    db_session.add(ProviderToken(provider_account_id=account.id, access_token="live-token"))
+    template = SearchTemplate(name="Media Buyer", hh_vacancy_id="777")
+    db_session.add(template)
+    await db_session.commit()
+    run = await search_runs_repo.create_search_run(
+        db_session, search_template_id=template.id, trigger=SearchRunTrigger.MANUAL
+    )
+
+    await process_one_run(db_session, run.id)
+
+    refreshed = await search_runs_repo.get_search_run(db_session, run.id)
+    assert refreshed.status.value == "completed"
+    assert refreshed.stats["found"] == 1
+    assert refreshed.stats["new"] == 1

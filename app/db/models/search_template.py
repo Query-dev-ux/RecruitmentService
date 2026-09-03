@@ -21,6 +21,13 @@ class SearchTemplate(UUIDPKMixin, TimestampMixin, Base):
     # it pulls scored candidates for a given vacancy via the API.
     crm_vacancy_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
+    # HH's own vacancy id — required to read inbound responses
+    # (GET /negotiations/response?vacancy_id=...), which is a distinct HH
+    # concept from crm_vacancy_id above. Independent of the resume-search
+    # criteria: a template with only this set (no criteria) reads
+    # negotiations without also running an unfiltered resume search.
+    hh_vacancy_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     auto_search_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

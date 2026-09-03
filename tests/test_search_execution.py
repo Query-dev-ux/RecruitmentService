@@ -61,7 +61,11 @@ async def test_execute_search_run_scores_and_dedupes(db_session: AsyncSession):
 
 
 async def test_execute_search_run_marks_template_last_error_on_failure(db_session: AsyncSession):
-    template = await _make_template(db_session, [])
+    # Needs at least one criterion — an empty-criteria template skips the
+    # resume-search path entirely (see execute_search_run's docstring) and
+    # would never call fetch_resumes at all, making this test meaningless.
+    criteria = [SearchTemplateCriterion(key="vertical", value="igaming", mode=CriterionMode.PREFERRED, weight=100)]
+    template = await _make_template(db_session, criteria)
     run = await search_runs_repo.create_search_run(
         db_session, search_template_id=template.id, trigger=SearchRunTrigger.MANUAL
     )
@@ -78,7 +82,8 @@ async def test_execute_search_run_marks_template_last_error_on_failure(db_sessio
 
 
 async def test_execute_search_run_is_idempotent_on_rerun(db_session: AsyncSession):
-    template = await _make_template(db_session, [])
+    criteria = [SearchTemplateCriterion(key="vertical", value="igaming", mode=CriterionMode.PREFERRED, weight=100)]
+    template = await _make_template(db_session, criteria)
     run1 = await search_runs_repo.create_search_run(
         db_session, search_template_id=template.id, trigger=SearchRunTrigger.MANUAL
     )
@@ -109,7 +114,8 @@ async def test_execute_search_run_applies_required_hard_filter(db_session: Async
 
 
 async def test_execute_search_run_marks_failed_on_provider_error(db_session: AsyncSession):
-    template = await _make_template(db_session, [])
+    criteria = [SearchTemplateCriterion(key="vertical", value="igaming", mode=CriterionMode.PREFERRED, weight=100)]
+    template = await _make_template(db_session, criteria)
     run = await search_runs_repo.create_search_run(
         db_session, search_template_id=template.id, trigger=SearchRunTrigger.MANUAL
     )
@@ -124,3 +130,81 @@ async def test_execute_search_run_marks_failed_on_provider_error(db_session: Asy
     refreshed_run = await search_runs_repo.get_search_run(db_session, run.id)
     assert refreshed_run.status.value == "failed"
     assert "HH is down" in refreshed_run.error_message
+
+
+async def never_called_fetch(params):
+    raise AssertionError("fetch_resumes should not be called for a criteria-less template")
+    yield  # pragma: no cover
+
+
+async def test_execute_search_run_skips_search_when_no_criteria(db_session: AsyncSession):
+    template = await _make_template(db_session, [])
+    run = await search_runs_repo.create_search_run(
+        db_session, search_template_id=template.id, trigger=SearchRunTrigger.MANUAL
+    )
+
+    await execute_search_run(db_session, run, template, never_called_fetch)
+
+    refreshed_run = await search_runs_repo.get_search_run(db_session, run.id)
+    assert refreshed_run.status.value == "completed"
+    assert refreshed_run.stats["found"] == 0
+
+
+async def test_execute_search_run_pulls_negotiations_when_hh_vacancy_id_set(db_session: AsyncSession):
+    template = SearchTemplate(name="Media Buyer", hh_vacancy_id="12345", criteria=[])
+    db_session.add(template)
+    await db_session.commit()
+    run = await search_runs_repo.create_search_run(
+        db_session, search_template_id=template.id, trigger=SearchRunTrigger.MANUAL
+    )
+
+    seen_vacancy_ids = []
+
+    async def fetch_negotiations(vacancy_id):
+        seen_vacancy_ids.append(vacancy_id)
+        yield RESUME_A
+
+    await execute_search_run(db_session, run, template, never_called_fetch, fetch_negotiations)
+
+    refreshed_run = await search_runs_repo.get_search_run(db_session, run.id)
+    assert seen_vacancy_ids == ["12345"]
+    assert refreshed_run.stats["found"] == 1
+    assert refreshed_run.stats["new"] == 1
+
+
+async def test_execute_search_run_combines_search_and_negotiations(db_session: AsyncSession):
+    criteria = [SearchTemplateCriterion(key="vertical", value="igaming", mode=CriterionMode.PREFERRED, weight=100)]
+    template = SearchTemplate(name="Media Buyer", hh_vacancy_id="12345", criteria=criteria)
+    db_session.add(template)
+    await db_session.commit()
+    run = await search_runs_repo.create_search_run(
+        db_session, search_template_id=template.id, trigger=SearchRunTrigger.MANUAL
+    )
+
+    resume_c = {"id": "res-3", "title": "From negotiation", "skill_set": []}
+
+    async def fetch_negotiations(vacancy_id):
+        yield resume_c
+
+    await execute_search_run(db_session, run, template, fake_fetch_two, fetch_negotiations)
+
+    refreshed_run = await search_runs_repo.get_search_run(db_session, run.id)
+    assert refreshed_run.stats["found"] == 3  # 2 from search + 1 from negotiations
+    assert refreshed_run.stats["new"] == 3
+
+
+async def test_execute_search_run_ignores_hh_vacancy_id_without_fetcher(db_session: AsyncSession):
+    """A template can have hh_vacancy_id set before the worker is wired up
+    with a real negotiations fetcher — must not crash, just skip that path."""
+    template = SearchTemplate(name="Media Buyer", hh_vacancy_id="12345", criteria=[])
+    db_session.add(template)
+    await db_session.commit()
+    run = await search_runs_repo.create_search_run(
+        db_session, search_template_id=template.id, trigger=SearchRunTrigger.MANUAL
+    )
+
+    await execute_search_run(db_session, run, template, never_called_fetch)  # fetch_negotiations omitted
+
+    refreshed_run = await search_runs_repo.get_search_run(db_session, run.id)
+    assert refreshed_run.status.value == "completed"
+    assert refreshed_run.stats["found"] == 0

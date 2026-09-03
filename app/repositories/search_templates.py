@@ -25,6 +25,7 @@ async def create_search_template(db: AsyncSession, data: SearchTemplateCreate) -
     template = SearchTemplate(
         name=data.name,
         crm_vacancy_id=data.crm_vacancy_id,
+        hh_vacancy_id=data.hh_vacancy_id,
         is_active=data.is_active,
         auto_search_enabled=data.auto_search_enabled,
         interval_minutes=data.interval_minutes,
@@ -47,6 +48,7 @@ async def update_search_template(db: AsyncSession, template: SearchTemplate, dat
     updatable_fields = (
         "name",
         "crm_vacancy_id",
+        "hh_vacancy_id",
         "is_active",
         "auto_search_enabled",
         "interval_minutes",

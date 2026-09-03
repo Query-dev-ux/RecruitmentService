@@ -32,6 +32,7 @@ def _validate_interval(interval_minutes: Optional[int]) -> Optional[int]:
 class SearchTemplateCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     crm_vacancy_id: Optional[str] = Field(default=None, max_length=255)
+    hh_vacancy_id: Optional[str] = Field(default=None, max_length=255)
     is_active: bool = True
     auto_search_enabled: bool = False
     interval_minutes: Optional[int] = None
@@ -51,6 +52,7 @@ class SearchTemplateUpdate(BaseModel):
 
     name: Optional[str] = Field(default=None, min_length=1, max_length=255)
     crm_vacancy_id: Optional[str] = Field(default=None, max_length=255)
+    hh_vacancy_id: Optional[str] = Field(default=None, max_length=255)
     is_active: Optional[bool] = None
     auto_search_enabled: Optional[bool] = None
     interval_minutes: Optional[int] = None
@@ -69,6 +71,7 @@ class SearchTemplateOut(BaseModel):
     id: UUID
     name: str
     crm_vacancy_id: Optional[str]
+    hh_vacancy_id: Optional[str]
     is_active: bool
     auto_search_enabled: bool
     interval_minutes: Optional[int]
