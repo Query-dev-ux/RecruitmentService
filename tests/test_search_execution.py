@@ -1,10 +1,16 @@
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.db.models import SearchTemplate, SearchTemplateCriterion
-from app.db.models.enums import CriterionMode, SearchRunTrigger
+from app.db.models import CandidateSource, SearchTemplate, SearchTemplateCriterion
+from app.db.models.enums import CriterionMode, DiscoveryChannel, SearchRunTrigger
 from app.repositories import search_runs as search_runs_repo
 from app.services.search_execution import execute_search_run
+
+
+async def _via_for(db_session, external_id: str):
+    result = await db_session.execute(select(CandidateSource).where(CandidateSource.external_id == external_id))
+    return result.scalar_one().via
 
 
 @pytest.fixture
@@ -208,3 +214,26 @@ async def test_execute_search_run_ignores_hh_vacancy_id_without_fetcher(db_sessi
     refreshed_run = await search_runs_repo.get_search_run(db_session, run.id)
     assert refreshed_run.status.value == "completed"
     assert refreshed_run.stats["found"] == 0
+
+
+async def test_execute_search_run_records_via_for_each_path(db_session: AsyncSession):
+    """The storage-level distinction CRM needs: a candidate found by active
+    search is tagged via=search, one found through an inbound response is
+    tagged via=negotiation — even within the same run."""
+    criteria = [SearchTemplateCriterion(key="vertical", value="igaming", mode=CriterionMode.PREFERRED, weight=100)]
+    template = SearchTemplate(name="Media Buyer", hh_vacancy_id="12345", criteria=criteria)
+    db_session.add(template)
+    await db_session.commit()
+    run = await search_runs_repo.create_search_run(
+        db_session, search_template_id=template.id, trigger=SearchRunTrigger.MANUAL
+    )
+    resume_c = {"id": "res-3", "title": "From negotiation", "skill_set": []}
+
+    async def fetch_negotiations(vacancy_id):
+        yield resume_c
+
+    await execute_search_run(db_session, run, template, fake_fetch_two, fetch_negotiations)
+
+    assert await _via_for(db_session, "res-1") == DiscoveryChannel.SEARCH
+    assert await _via_for(db_session, "res-2") == DiscoveryChannel.SEARCH
+    assert await _via_for(db_session, "res-3") == DiscoveryChannel.NEGOTIATION

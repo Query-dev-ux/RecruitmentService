@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
-from app.db.models.enums import ReviewStatus, ScoreTier, SourceType
+from app.db.models.enums import DiscoveryChannel, ReviewStatus, ScoreTier, SourceType
 
 
 class CandidateSourceOut(BaseModel):
@@ -13,6 +13,7 @@ class CandidateSourceOut(BaseModel):
     source: SourceType
     external_id: str
     external_url: Optional[str]
+    via: Optional[DiscoveryChannel]
     first_seen_at: datetime
     last_seen_at: datetime
 

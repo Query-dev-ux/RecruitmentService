@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_service_token
 from app.db.base import get_db
-from app.db.models.enums import ReviewStatus, SourceType
+from app.db.models.enums import DiscoveryChannel, ReviewStatus, SourceType
 from app.repositories import candidates as repo
 from app.schemas.external_candidate import CandidateReviewIn, ExternalCandidateOut
 
@@ -16,6 +16,7 @@ router = APIRouter(prefix="/external-candidates", tags=["external-candidates"])
 @router.get("", response_model=list[ExternalCandidateOut])
 async def list_candidates(
     source: Optional[SourceType] = Query(default=None),
+    via: Optional[DiscoveryChannel] = Query(default=None, description="HH only: search vs. negotiation"),
     search_template_id: Optional[uuid.UUID] = Query(default=None),
     min_score: Optional[int] = Query(default=None, ge=0, le=100),
     review_status: Optional[ReviewStatus] = Query(default=None),
@@ -27,6 +28,7 @@ async def list_candidates(
     return await repo.list_candidates(
         db,
         source=source,
+        via=via,
         search_template_id=search_template_id,
         min_score=min_score,
         review_status=review_status,

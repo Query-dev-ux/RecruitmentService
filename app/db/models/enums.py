@@ -55,3 +55,12 @@ class ReviewStatus(str, enum.Enum):
     PENDING = "pending"
     ADDED = "added"
     SKIPPED = "skipped"
+
+
+class DiscoveryChannel(str, enum.Enum):
+    """How an HH-sourced candidate was found — distinct from `source`
+    (hh/telegram), which doesn't capture this. Null for Telegram (only one
+    channel there) and for any HH candidate predating this field."""
+
+    SEARCH = "search"
+    NEGOTIATION = "negotiation"

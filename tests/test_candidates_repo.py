@@ -1,10 +1,17 @@
 import uuid
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.db.models.enums import ScoreTier, SourceType
+from app.db.models import CandidateSource
+from app.db.models.enums import DiscoveryChannel, ScoreTier, SourceType
 from app.repositories import candidates as repo
+
+
+async def _via_for(db_session: AsyncSession, external_id: str) -> str | None:
+    result = await db_session.execute(select(CandidateSource).where(CandidateSource.external_id == external_id))
+    return result.scalar_one().via
 
 
 @pytest.fixture
@@ -51,6 +58,71 @@ async def test_get_or_create_candidate_dedupes_by_source_and_external_id(db_sess
     assert second_is_new is False
     assert second.id == first.id
     assert second.parsed_profile == {"position_title": "v2"}  # snapshot refreshed, not duplicated
+
+
+async def test_via_is_stored_for_hh_candidates(db_session: AsyncSession):
+    await repo.get_or_create_candidate(
+        db_session,
+        source=SourceType.HH,
+        external_id="resume-1",
+        external_url=None,
+        raw_data={},
+        parsed_profile={},
+        via=DiscoveryChannel.NEGOTIATION,
+    )
+
+    assert await _via_for(db_session, "resume-1") == DiscoveryChannel.NEGOTIATION
+
+
+async def test_via_defaults_to_none_when_not_passed(db_session: AsyncSession):
+    await repo.get_or_create_candidate(
+        db_session, source=SourceType.TELEGRAM, external_id="tg-1", external_url=None, raw_data={}, parsed_profile={}
+    )
+
+    assert await _via_for(db_session, "tg-1") is None
+
+
+async def test_via_updates_to_latest_channel_on_resighting(db_session: AsyncSession):
+    await repo.get_or_create_candidate(
+        db_session,
+        source=SourceType.HH,
+        external_id="resume-1",
+        external_url=None,
+        raw_data={},
+        parsed_profile={},
+        via=DiscoveryChannel.SEARCH,
+    )
+
+    _, is_new = await repo.get_or_create_candidate(
+        db_session,
+        source=SourceType.HH,
+        external_id="resume-1",
+        external_url=None,
+        raw_data={},
+        parsed_profile={},
+        via=DiscoveryChannel.NEGOTIATION,
+    )
+
+    assert is_new is False
+    assert await _via_for(db_session, "resume-1") == DiscoveryChannel.NEGOTIATION
+
+
+async def test_via_left_unchanged_when_resighted_without_a_channel(db_session: AsyncSession):
+    await repo.get_or_create_candidate(
+        db_session,
+        source=SourceType.HH,
+        external_id="resume-1",
+        external_url=None,
+        raw_data={},
+        parsed_profile={},
+        via=DiscoveryChannel.SEARCH,
+    )
+
+    await repo.get_or_create_candidate(
+        db_session, source=SourceType.HH, external_id="resume-1", external_url=None, raw_data={}, parsed_profile={}
+    )
+
+    assert await _via_for(db_session, "resume-1") == DiscoveryChannel.SEARCH
 
 
 async def test_different_sources_with_same_external_id_are_distinct_candidates(db_session: AsyncSession):

@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.models import CandidateScore, CandidateSource, ExternalCandidate
-from app.db.models.enums import ReviewStatus, ScoreTier, SourceType
+from app.db.models.enums import DiscoveryChannel, ReviewStatus, ScoreTier, SourceType
 
 _WITH_SOURCES_AND_SCORES = (
     selectinload(ExternalCandidate.sources),
@@ -23,6 +23,7 @@ async def get_or_create_candidate(
     external_url: Optional[str],
     raw_data: dict,
     parsed_profile: dict,
+    via: Optional[DiscoveryChannel] = None,
 ) -> tuple[ExternalCandidate, bool]:
     """Dedup key: (source, external_id), enforced by candidate_sources'
     unique constraint. A matching source row means we've already seen this
@@ -32,6 +33,11 @@ async def get_or_create_candidate(
     actually available (post contact-reveal for HH, at intake for
     Telegram), not in this generic dedup path. Fuzzy name/company matching
     is explicitly out of scope per the brief.
+
+    `via` records how an HH sighting was found (search vs. negotiation) —
+    left None for Telegram. On a re-sighting via a different channel than
+    the one that first found them (e.g. they later apply directly after
+    surfacing in a search), the latest channel wins, same as raw_data.
     """
     result = await db.execute(
         select(CandidateSource).where(CandidateSource.source == source, CandidateSource.external_id == external_id)
@@ -48,6 +54,8 @@ async def get_or_create_candidate(
         existing_source.last_seen_at = now
         if external_url:
             existing_source.external_url = external_url
+        if via is not None:
+            existing_source.via = via
         await db.commit()
         return candidate, False
 
@@ -61,6 +69,7 @@ async def get_or_create_candidate(
             source=source,
             external_id=external_id,
             external_url=external_url,
+            via=via,
             first_seen_at=now,
             last_seen_at=now,
         )
@@ -140,6 +149,7 @@ async def list_candidates(
     db: AsyncSession,
     *,
     source: Optional[SourceType] = None,
+    via: Optional[DiscoveryChannel] = None,
     search_template_id: Optional[uuid.UUID] = None,
     min_score: Optional[int] = None,
     review_status: Optional[ReviewStatus] = None,
@@ -161,10 +171,12 @@ async def list_candidates(
     id_query = select(ExternalCandidate.id).distinct()
     if review_status is not None:
         id_query = id_query.where(ExternalCandidate.review_status == review_status)
-    if source is not None:
-        id_query = id_query.join(
-            CandidateSource, CandidateSource.external_candidate_id == ExternalCandidate.id
-        ).where(CandidateSource.source == source)
+    if source is not None or via is not None:
+        id_query = id_query.join(CandidateSource, CandidateSource.external_candidate_id == ExternalCandidate.id)
+        if source is not None:
+            id_query = id_query.where(CandidateSource.source == source)
+        if via is not None:
+            id_query = id_query.where(CandidateSource.via == via)
     if search_template_id is not None or min_score is not None:
         id_query = id_query.join(CandidateScore, CandidateScore.external_candidate_id == ExternalCandidate.id)
         if search_template_id is not None:

@@ -32,7 +32,7 @@ from typing import AsyncIterator, Callable, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import SearchRun, SearchTemplate
-from app.db.models.enums import SourceType
+from app.db.models.enums import DiscoveryChannel, SourceType
 from app.logging_config import get_logger, log_event
 from app.providers.hh.normalize import normalize_resume
 from app.providers.hh.search import build_search_params
@@ -117,6 +117,7 @@ async def _process_hh_resume(
         external_url=raw_resume.get("alternate_url"),
         raw_data=raw_resume,
         parsed_profile=profile.model_dump(),
+        via=DiscoveryChannel(via),
     )
     stats["new" if is_new else "known"] += 1
 

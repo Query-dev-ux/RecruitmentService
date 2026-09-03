@@ -6,7 +6,7 @@ from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, Integer, J
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDPKMixin
-from app.db.models.enums import ReviewStatus, ScoreTier, SourceType
+from app.db.models.enums import DiscoveryChannel, ReviewStatus, ScoreTier, SourceType
 
 
 class ExternalCandidate(UUIDPKMixin, TimestampMixin, Base):
@@ -53,6 +53,13 @@ class CandidateSource(UUIDPKMixin, Base):
     )
     external_id: Mapped[str] = mapped_column(String(255), nullable=False)
     external_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    # How this HH sighting was found — search vs. inbound negotiation.
+    # Always null for Telegram (only one channel there) and for any HH row
+    # sourced before this field existed.
+    via: Mapped[Optional[DiscoveryChannel]] = mapped_column(
+        SAEnum(DiscoveryChannel, name="discovery_channel", values_callable=lambda e: [m.value for m in e]),
+        nullable=True,
+    )
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 

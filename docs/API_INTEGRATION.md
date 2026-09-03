@@ -225,6 +225,8 @@ GET /external-candidates?search_template_id={id}&min_score=55&source=hh&review_s
 
 Параметры (все опциональны):
 - `source` — `hh` | `telegram`
+- `via` — только для HH: `search` | `negotiation` (см. раздел 5 — как отличить
+  «нашли поиском» от «откликнулся сам»)
 - `search_template_id` — только кандидаты, оценённые по этому шаблону
 - `min_score` — только с score ≥ N (0–100)
 - `review_status` — `pending` | `added` | `skipped`
@@ -249,7 +251,7 @@ GET /external-candidates?search_template_id={id}&min_score=55&source=hh&review_s
     "reviewed_at": null,
     "reviewed_by": null,
     "sources": [
-      { "source": "hh", "external_id": "12345", "external_url": "https://hh.ru/resume/12345", "first_seen_at": "...", "last_seen_at": "..." }
+      { "source": "hh", "external_id": "12345", "external_url": "https://hh.ru/resume/12345", "via": "search", "first_seen_at": "...", "last_seen_at": "..." }
     ],
     "scores": [
       { "search_template_id": "...", "score": 82, "tier": "high", "hard_filters_passed": true, "breakdown": {...}, "computed_at": "..." }
@@ -264,6 +266,11 @@ GET /external-candidates?search_template_id={id}&min_score=55&source=hh&review_s
   источника (HH или Telegram) — это то, что должно попасть в CRM.
 - `sources[]` — один кандидат может иметь несколько записей (пришёл и с HH, и из
   Telegram) — дедупликация уже сделана на нашей стороне.
+- `sources[].via` — только для HH: `search` (нашли активным поиском) или
+  `negotiation` (сам откликнулся на вакансию); `null` для Telegram и для HH-записей,
+  созданных до появления этого поля. Если один и тот же кандидат сначала нашёлся
+  поиском, а потом ещё и откликнулся сам (или наоборот) — здесь остаётся канал
+  последнего обнаружения, не история всех каналов.
 - `scores[]` — по одной записи на каждый `search_template`, по которому кандидата
   оценивали (Telegram-кандидат оценивается только если у него указана вакансия,
   совпадающая с `crm_vacancy_id` какого-то шаблона).
@@ -328,8 +335,9 @@ false`, если такой критерий стоит `required`), а рабо
 дополнительно подтягивает новые отклики на эту вакансию, наравне с активным поиском
 (если у шаблона есть и критерии, и `hh_vacancy_id` — выполняется и то, и другое, в
 одном `search_run` и с одной статистикой). Кандидаты из откликов попадают в тот же
-`GET /external-candidates` с `source: "hh"` — на уровне API отличить «нашли поиском»
-от «откликнулся сам» сейчас нельзя, обе ветки пишут в одну и ту же сущность.
+`GET /external-candidates` с `source: "hh"`, как и результаты поиска — обе ветки
+пишут в одну и ту же сущность, но отличить их можно через `sources[].via`
+(`search` | `negotiation`) или фильтром `?via=negotiation` на самом эндпоинте.
 
 Технические детали (на случай расхождений с реальным поведением HH — это не
 проверялось на живом трафике, только по спецификации): читается только «свежая»
@@ -408,8 +416,10 @@ Recruitment
 
 - `GET /external-candidates?review_status=pending&source=hh` и `source=telegram` —
   оба источника уже реально работают (Telegram — через CGBot, HH — через поиск и/или
-  входящие отклики, если у шаблона указан `hh_vacancy_id`). На уровне API отклик с HH
-  и находка активным поиском неотличимы (оба `source: "hh"`).
+  входящие отклики, если у шаблона указан `hh_vacancy_id`). Оба HH-пути пишут
+  `source: "hh"`, но их можно разделить через `sources[].via` / `?via=negotiation` —
+  для этого экрана («Отклики» в узком смысле — сам откликнулся) имеет смысл
+  фильтровать именно на `via=negotiation`, а не просто на `source=hh`.
 - Карточка: имя (у HH — только после раскрытия контактов, но во входящих откликах имя
   и контакты часто уже видны без этого; у Telegram — `telegram_full_name`), позиция/
   текст отклика, GEO, бейдж тира (LOW/MEDIUM/HIGH/HOT, цветом), иконка источника, по
