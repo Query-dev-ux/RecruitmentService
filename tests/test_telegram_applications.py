@@ -73,6 +73,71 @@ def test_submit_captures_telegram_name_and_username(client, auth_headers):
     assert candidate["sources"][0]["external_url"] == "https://t.me/daniil_cg"
 
 
+def test_submit_exposes_vacancy_ref_on_the_candidate(client, auth_headers):
+    submit = client.post(
+        "/telegram/applications",
+        json={"telegram_user_id": 900, "vacancy_ref": "Media Buyer (Facebook)", "candidate_text": "hi"},
+        headers=auth_headers,
+    ).json()
+
+    candidate = client.get(f"/external-candidates/{submit['external_candidate_id']}", headers=auth_headers).json()
+
+    assert candidate["vacancy_ref"] == "Media Buyer (Facebook)"
+
+
+def test_submit_without_vacancy_ref_leaves_it_null(client, auth_headers):
+    submit = client.post(
+        "/telegram/applications", json={"telegram_user_id": 901, "candidate_text": "hi"}, headers=auth_headers
+    ).json()
+
+    candidate = client.get(f"/external-candidates/{submit['external_candidate_id']}", headers=auth_headers).json()
+
+    assert candidate["vacancy_ref"] is None
+
+
+def test_resubmit_updates_vacancy_ref_but_a_general_reply_does_not_clear_it(client, auth_headers):
+    first = client.post(
+        "/telegram/applications",
+        json={"telegram_user_id": 902, "vacancy_ref": "vac-1", "candidate_text": "first"},
+        headers=auth_headers,
+    ).json()
+
+    client.post(
+        "/telegram/applications",
+        json={"telegram_user_id": 902, "candidate_text": "general follow-up, no vacancy this time"},
+        headers=auth_headers,
+    )
+
+    candidate = client.get(f"/external-candidates/{first['external_candidate_id']}", headers=auth_headers).json()
+    assert candidate["vacancy_ref"] == "vac-1"  # unchanged — a vacancy-less reply doesn't erase it
+
+    client.post(
+        "/telegram/applications",
+        json={"telegram_user_id": 902, "vacancy_ref": "vac-2", "candidate_text": "applied elsewhere too"},
+        headers=auth_headers,
+    )
+    candidate = client.get(f"/external-candidates/{first['external_candidate_id']}", headers=auth_headers).json()
+    assert candidate["vacancy_ref"] == "vac-2"  # latest actual vacancy wins
+
+
+def test_list_filters_by_vacancy_ref(client, auth_headers):
+    client.post(
+        "/telegram/applications",
+        json={"telegram_user_id": 910, "vacancy_ref": "vac-a", "candidate_text": "a"},
+        headers=auth_headers,
+    )
+    client.post(
+        "/telegram/applications",
+        json={"telegram_user_id": 911, "vacancy_ref": "vac-b", "candidate_text": "b"},
+        headers=auth_headers,
+    )
+
+    vac_a_only = client.get("/external-candidates", params={"vacancy_ref": "vac-a"}, headers=auth_headers).json()
+
+    assert len(vac_a_only) == 1
+    assert vac_a_only[0]["vacancy_ref"] == "vac-a"
+
+
 def test_submit_without_username_leaves_external_url_empty(client, auth_headers):
     submit = client.post(
         "/telegram/applications",

@@ -54,6 +54,13 @@ async def handle_telegram_application(
         },
         parsed_profile=profile.model_dump(),
     )
+    if vacancy_ref:
+        # Denormalized onto the candidate so it's visible via
+        # GET /external-candidates — see the column's docstring in
+        # db/models/candidate.py. Only overwrite on an actual value, same
+        # as `via` for HH sources, so a later "Общий отклик" (no
+        # vacancy_ref) doesn't erase a previously known one.
+        candidate.vacancy_ref = vacancy_ref
     log_event(
         logger,
         "CANDIDATE_FOUND" if is_new else "CANDIDATE_DUPLICATE",

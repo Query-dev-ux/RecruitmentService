@@ -24,6 +24,16 @@ class ExternalCandidate(UUIDPKMixin, TimestampMixin, Base):
     # and stays null until one exists.
     crm_candidate_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
+    # Which vacancy this candidate applied to — set from TelegramApplication.
+    # vacancy_ref (see services/telegram_intake.py); stays null for HH-only
+    # candidates, whose vacancy association lives on CandidateScore.search_
+    # template_id / SearchTemplate.hh_vacancy_id instead. Was previously
+    # captured only in telegram_applications and never surfaced via this
+    # API — CRM had no way to see which vacancy a Telegram reply was for.
+    # On re-application, the latest vacancy_ref wins, same "latest wins"
+    # pattern as raw_data/parsed_profile.
+    vacancy_ref: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
     # HR's triage decision on this raw finding — NOT the hiring pipeline
     # itself (that's entirely CRM's, once ADDED). Every new finding (search
     # result or, later, inbound response) starts PENDING regardless of

@@ -17,6 +17,7 @@ router = APIRouter(prefix="/external-candidates", tags=["external-candidates"])
 async def list_candidates(
     source: Optional[SourceType] = Query(default=None),
     via: Optional[DiscoveryChannel] = Query(default=None, description="HH only: search vs. negotiation"),
+    vacancy_ref: Optional[str] = Query(default=None, description="Telegram only: the vacancy applied to"),
     search_template_id: Optional[uuid.UUID] = Query(default=None),
     min_score: Optional[int] = Query(default=None, ge=0, le=100),
     review_status: Optional[ReviewStatus] = Query(default=None),
@@ -29,6 +30,7 @@ async def list_candidates(
         db,
         source=source,
         via=via,
+        vacancy_ref=vacancy_ref,
         search_template_id=search_template_id,
         min_score=min_score,
         review_status=review_status,

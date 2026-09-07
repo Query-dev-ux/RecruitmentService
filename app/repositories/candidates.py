@@ -150,6 +150,7 @@ async def list_candidates(
     *,
     source: Optional[SourceType] = None,
     via: Optional[DiscoveryChannel] = None,
+    vacancy_ref: Optional[str] = None,
     search_template_id: Optional[uuid.UUID] = None,
     min_score: Optional[int] = None,
     review_status: Optional[ReviewStatus] = None,
@@ -171,6 +172,8 @@ async def list_candidates(
     id_query = select(ExternalCandidate.id).distinct()
     if review_status is not None:
         id_query = id_query.where(ExternalCandidate.review_status == review_status)
+    if vacancy_ref is not None:
+        id_query = id_query.where(ExternalCandidate.vacancy_ref == vacancy_ref)
     if source is not None or via is not None:
         id_query = id_query.join(CandidateSource, CandidateSource.external_candidate_id == ExternalCandidate.id)
         if source is not None:

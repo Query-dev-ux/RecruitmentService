@@ -37,6 +37,7 @@ class ExternalCandidateOut(BaseModel):
     last_seen_at: datetime
     parsed_profile: Optional[dict]
     crm_candidate_id: Optional[str]
+    vacancy_ref: Optional[str]
     review_status: ReviewStatus
     reviewed_at: Optional[datetime]
     reviewed_by: Optional[str]
